@@ -1,7 +1,6 @@
 import { useState, useEffect } from "react";
 import { motion } from "framer-motion";
-import { Button } from "@/components/ui/button";
-import { Award, Download, Share2, Loader } from "lucide-react";
+import { Award, Download, Share2, Loader2, GraduationCap } from "lucide-react";
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
@@ -18,7 +17,6 @@ const CertificatesView = () => {
     if (!user) return;
     loadCertificates();
 
-    // Subscribe to real-time changes
     const channel = supabase
       .channel("certificates_all")
       .on("postgres_changes", { event: "*", schema: "public", table: "certificates" }, () => {
@@ -31,37 +29,58 @@ const CertificatesView = () => {
 
   const loadCertificates = async () => {
     if (!user) return;
-    
-    // FetchCertificates earned by current user (as learner)
-    const { data: earned } = await supabase
+
+    const { data: myProfile } = await supabase
+      .from("profiles")
+      .select("name")
+      .eq("user_id", user.id)
+      .maybeSingle();
+
+    const myName = myProfile?.name || "Learner";
+
+    const { data: earnedRaw } = await supabase
       .from("certificates")
       .select("*")
       .eq("user_id", user.id)
       .order("created_at", { ascending: false });
 
-    setEarnedCerts(earned || []);
+    setEarnedCerts((earnedRaw || []).map(c => ({ ...c, learner_name: myName })));
 
-    // Fetch certificates issued by current user (as teacher)
-    // This uses RLS policy: teachers can see certs they issued via session relationship
-    const { data: issued } = await supabase
-      .from("certificates")
-      .select("*")
-      .order("created_at", { ascending: false });
+    const { data: teacherSessions } = await supabase
+      .from("sessions")
+      .select("id")
+      .eq("teacher_id", user.id)
+      .eq("status", "completed");
 
-    // Filter for only certificates issued by this teacher
-    const sessionIds = (earned || []).map(c => c.session_id).filter(Boolean);
-    if (sessionIds.length > 0) {
-      const { data: sessions } = await supabase
-        .from("sessions")
-        .select("id, teacher_id, learner_id")
-        .in("id", sessionIds)
-        .eq("teacher_id", user.id);
+    if (teacherSessions && teacherSessions.length > 0) {
+      const teacherSessionIds = teacherSessions.map((s: any) => s.id);
 
-      const teacherSessionIds = (sessions || []).map(s => s.id);
-      const filteredIssued = (issued || []).filter(c => 
-        teacherSessionIds.includes(c.session_id) && c.user_id !== user.id
-      );
-      setIssuedCerts(filteredIssued);
+      const { data: issuedRaw } = await supabase
+        .from("certificates")
+        .select("*")
+        .in("session_id", teacherSessionIds)
+        .order("created_at", { ascending: false });
+
+      const teacherIssuedRaw = (issuedRaw || []).filter((c: any) => c.user_id !== user.id);
+
+      if (teacherIssuedRaw.length > 0) {
+        const learnerIds = [...new Set(teacherIssuedRaw.map((c: any) => c.user_id))];
+        const { data: profiles } = await supabase
+          .from("profiles")
+          .select("user_id, name")
+          .in("user_id", learnerIds);
+
+        const profileMap: Record<string, string> = Object.fromEntries(
+          (profiles || []).map((p: any) => [p.user_id, p.name])
+        );
+
+        setIssuedCerts(teacherIssuedRaw.map((c: any) => ({
+          ...c,
+          learner_name: profileMap[c.user_id] || "Learner",
+        })));
+      } else {
+        setIssuedCerts([]);
+      }
     } else {
       setIssuedCerts([]);
     }
@@ -72,157 +91,191 @@ const CertificatesView = () => {
   const shareCert = (certId: string) => {
     const url = `${window.location.origin}/verify?cert=${certId}`;
     navigator.clipboard.writeText(url);
-    toast.success("Verification link copied!");
+    toast.success("Verification link copied! 🔗");
   };
 
-  const handleDownloadFromStorage = (cert: any) => {
-    if (cert.pdf_url) {
-      const link = document.createElement("a");
-      link.href = cert.pdf_url;
-      link.download = `${cert.skill_name}-certificate`;
-      link.target = "_blank";
-      link.rel = "noopener noreferrer";
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-      toast.success("Certificate downloaded!");
-    }
-  };
-
-  const handleDownloadDocx = async (cert: any) => {
+  const handleDownload = async (cert: any) => {
     setDownloadingId(cert.id);
     try {
-      // Try to download from storage first (faster, persisted)
-      if (cert.pdf_url) {
-        handleDownloadFromStorage(cert);
-      } else {
-        // Fallback: regenerate DOCX locally
-        const docBlob = await generateCertificate({
-          learnerName: "Learner",
-          teacherName: cert.mentor_name || "Teacher",
-          skillName: cert.skill_name,
-          date: new Date(cert.created_at).toLocaleDateString("en-US", { year: "numeric", month: "long", day: "numeric" }),
-          certificateId: cert.certificate_id,
-        });
-
-        downloadCertificate(docBlob, `${cert.skill_name}-certificate.docx`);
-      }
-      toast.success("Certificate downloaded!");
+      const blob = await generateCertificate({
+        learnerName: cert.learner_name || "Learner",
+        teacherName: cert.mentor_name || "Teacher",
+        skillName: cert.skill_name,
+        date: new Date(cert.created_at).toLocaleDateString("en-US", {
+          year: "numeric", month: "long", day: "numeric",
+        }),
+        certificateId: cert.certificate_id,
+      });
+      downloadCertificate(blob, `${cert.skill_name}-certificate.pdf`);
+      toast.success("Certificate downloaded! 🎓");
     } catch (error) {
-      console.error("Download error:", error);
-      toast.error("Failed to download certificate");
+      if (cert.pdf_url) {
+        window.open(cert.pdf_url, "_blank");
+        toast.success("Certificate opened!");
+      } else {
+        toast.error("Failed to download certificate");
+      }
     } finally {
       setDownloadingId(null);
     }
   };
 
-  if (loading) return <div className="text-muted-foreground">Loading certificates...</div>;
-
-  const renderCertificateGrid = (certs: any[], title: string, emptyMessage: string) => {
-    if (certs.length === 0) {
-      return <p className="text-muted-foreground">{emptyMessage}</p>;
-    }
-
+  if (loading) {
     return (
-      <>
-        <h2 className="text-2xl font-bold font-display mb-4 mt-8">{title}</h2>
-        <div className="grid md:grid-cols-2 gap-6">
-          {certs.map((cert, i) => (
-            <motion.div
-              key={cert.id}
-              className="relative group bg-card rounded-2xl overflow-hidden shadow-lg border border-border/40 hover:shadow-2xl hover:-translate-y-1 transition-all duration-300"
-              initial={{ opacity: 0, scale: 0.95 }}
-              animate={{ opacity: 1, scale: 1 }}
-              transition={{ delay: i * 0.1, type: "spring" }}
-            >
-              {/* Premium Top Half */}
-              <div className="relative p-8 text-center bg-gradient-to-br from-[#1E293B] to-[#0F172A] overflow-hidden">
-                <div className="absolute inset-0 opacity-10 bg-[radial-gradient(ellipse_at_top,_var(--tw-gradient-stops))] from-yellow-500 via-transparent to-transparent"></div>
-                <div className="relative z-10">
-                  <div className="w-16 h-16 mx-auto mb-4 rounded-full bg-gradient-to-br from-yellow-400 to-yellow-600 p-0.5 shadow-lg shadow-yellow-500/20">
-                    <div className="w-full h-full bg-slate-900 rounded-full flex items-center justify-center">
-                      <Award className="w-8 h-8 text-yellow-400" />
-                    </div>
-                  </div>
-                  <h3 className="text-2xl font-black font-display tracking-tight text-white mb-1">CERTIFICATE</h3>
-                  <p className="text-sm font-medium text-yellow-400/90 uppercase tracking-widest mb-1">of Completion</p>
-                  <div className="w-12 h-0.5 bg-yellow-500/50 mx-auto my-3 rounded-full"></div>
-                  <p className="text-lg font-semibold text-slate-200">{cert.skill_name}</p>
-                </div>
+      <div className="space-y-4">
+        <div className="grid md:grid-cols-2 gap-4">
+          {[1, 2].map(i => (
+            <div key={i} className="bg-white dark:bg-slate-900 rounded-2xl shadow-card border border-border animate-pulse overflow-hidden">
+              <div className="h-36 bg-gradient-to-br from-slate-200 to-slate-300 dark:from-slate-700 dark:to-slate-800" />
+              <div className="p-5 space-y-3">
+                <div className="h-4 bg-muted rounded w-1/2" />
+                <div className="h-3 bg-muted rounded w-2/3" />
+                <div className="h-9 bg-muted rounded-xl mt-4" />
               </div>
-              <div className="p-6 bg-card">
-                <div className="text-sm space-y-3 mb-6">
-                  <div className="flex justify-between items-center border-b border-border/50 pb-2">
-                    <span className="text-muted-foreground text-xs uppercase tracking-wider font-semibold">Teacher</span>
-                    <span className="font-bold text-foreground">{cert.mentor_name}</span>
-                  </div>
-                  <div className="flex justify-between items-center border-b border-border/50 pb-2">
-                    <span className="text-muted-foreground text-xs uppercase tracking-wider font-semibold">Date</span>
-                    <span className="font-bold text-foreground">{new Date(cert.created_at).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' })}</span>
-                  </div>
-                  <div className="flex justify-between items-center">
-                    <span className="text-muted-foreground text-xs uppercase tracking-wider font-semibold">Credential ID</span>
-                    <span className="font-mono text-xs font-medium text-primary bg-primary/10 px-2 py-0.5 rounded-md">{cert.certificate_id}</span>
-                  </div>
-                </div>
-                <div className="flex gap-3 mt-4">
-                  <Button
-                    variant="default"
-                    className="flex-1 bg-gradient-to-r from-yellow-500 to-yellow-600 hover:from-yellow-600 hover:to-yellow-700 text-white border-0 shadow-md shadow-yellow-500/20"
-                    onClick={() => handleDownloadDocx(cert)}
-                    disabled={downloadingId === cert.id}
-                  >
-                    {downloadingId === cert.id ? (
-                      <Loader className="w-4 h-4 mr-2 animate-spin" />
-                    ) : (
-                      <Download className="w-4 h-4 mr-2" />
-                    )}
-                    Download
-                  </Button>
-                  <Button variant="outline" className="shrink-0 hover:bg-slate-100 dark:hover:bg-slate-800" onClick={() => shareCert(cert.certificate_id)}>
-                    <Share2 className="w-4 h-4 text-slate-600 dark:text-slate-400" />
-                  </Button>
-                </div>
-              </div>
-            </motion.div>
+            </div>
           ))}
         </div>
-      </>
+      </div>
     );
-  };
+  }
+
+  const renderCertGrid = (certs: any[], isTeacher = false) => (
+    <div className="grid md:grid-cols-2 gap-5">
+      {certs.map((cert, i) => (
+        <motion.div
+          key={cert.id}
+          className="bg-white dark:bg-slate-900 rounded-2xl shadow-card border border-border overflow-hidden hover:shadow-elevated transition-all duration-300 hover:-translate-y-0.5"
+          initial={{ opacity: 0, scale: 0.96 }}
+          animate={{ opacity: 1, scale: 1 }}
+          transition={{ delay: i * 0.08, type: "spring" }}
+        >
+          {/* Premium top section */}
+          <div className="relative p-8 text-center bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 overflow-hidden">
+            {/* Ambient glow */}
+            <div className="absolute inset-0 opacity-20 bg-[radial-gradient(ellipse_at_top,_#facc15,_transparent)]" />
+            <div className="absolute top-0 left-0 right-0 h-px bg-gradient-to-r from-transparent via-yellow-500/50 to-transparent" />
+
+            <div className="relative z-10">
+              {/* Icon */}
+              <div className="w-14 h-14 mx-auto mb-4 rounded-2xl bg-gradient-to-br from-yellow-400 to-amber-600 flex items-center justify-center shadow-lg shadow-amber-500/30">
+                <Award className="w-7 h-7 text-white" />
+              </div>
+
+              <p className="text-yellow-400/80 text-[10px] font-bold uppercase tracking-[0.2em] mb-1">Certificate of Completion</p>
+              <h3 className="text-xl font-black font-display text-white mb-2 tracking-tight">{cert.skill_name}</h3>
+
+              {isTeacher ? (
+                <p className="text-slate-400 text-xs">Issued to <span className="text-slate-200 font-semibold">{cert.learner_name}</span></p>
+              ) : (
+                <p className="text-slate-400 text-xs">Earned by <span className="text-slate-200 font-semibold">{cert.learner_name}</span></p>
+              )}
+            </div>
+          </div>
+
+          {/* Details section */}
+          <div className="p-5">
+            <div className="space-y-2.5 mb-5">
+              {isTeacher ? (
+                <div className="flex items-center justify-between py-2 border-b border-border/50">
+                  <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Learner</span>
+                  <span className="font-semibold text-sm text-foreground">{cert.learner_name}</span>
+                </div>
+              ) : (
+                <div className="flex items-center justify-between py-2 border-b border-border/50">
+                  <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Teacher</span>
+                  <span className="font-semibold text-sm text-foreground">{cert.mentor_name}</span>
+                </div>
+              )}
+              <div className="flex items-center justify-between py-2 border-b border-border/50">
+                <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Date</span>
+                <span className="font-semibold text-sm text-foreground">
+                  {new Date(cert.created_at).toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" })}
+                </span>
+              </div>
+              <div className="flex items-center justify-between py-2">
+                <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Credential ID</span>
+                <span className="font-mono text-[10px] font-semibold text-primary bg-primary/8 px-2 py-1 rounded-lg border border-primary/20">
+                  {cert.certificate_id}
+                </span>
+              </div>
+            </div>
+
+            <div className="flex gap-2">
+              <button
+                className="flex-1 inline-flex items-center justify-center gap-2 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-600 hover:to-amber-700 text-white text-xs font-semibold px-4 py-2.5 rounded-xl transition-all duration-200 shadow-sm hover:shadow-md disabled:opacity-50"
+                onClick={() => handleDownload(cert)}
+                disabled={downloadingId === cert.id}
+              >
+                {downloadingId === cert.id ? (
+                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                ) : (
+                  <Download className="w-3.5 h-3.5" />
+                )}
+                Download PDF
+              </button>
+              <button
+                className="w-10 h-10 rounded-xl bg-muted hover:bg-muted-foreground/10 flex items-center justify-center transition-colors shrink-0"
+                onClick={() => shareCert(cert.certificate_id)}
+                title="Copy verification link"
+              >
+                <Share2 className="w-4 h-4 text-muted-foreground" />
+              </button>
+            </div>
+          </div>
+        </motion.div>
+      ))}
+    </div>
+  );
 
   return (
-    <div>
-      <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }}>
-        <h1 className="text-3xl font-bold font-display mb-1">Certificates</h1>
-        <p className="text-muted-foreground mb-8">View and manage your certificates</p>
-      </motion.div>
-
-      {/* My Earned Certificates (as learner) */}
-      {renderCertificateGrid(
-        earnedCerts,
-        "My Earned Certificates",
-        "No certificates earned yet. Complete tasks to earn certificates!"
-      )}
-
-      {/* Issued Certificates (as teacher) */}
-      {issuedCerts.length > 0 && renderCertificateGrid(
-        issuedCerts,
-        "Certificates Issued",
-        "No certificates issued yet"
-      )}
+    <div className="space-y-8">
+      {/* Header */}
+      <div>
+        <h1 className="text-2xl font-bold font-display text-foreground mb-1">Certificates</h1>
+        <p className="text-muted-foreground text-sm">View and download your earned certificates</p>
+      </div>
 
       {/* Empty state */}
       {earnedCerts.length === 0 && issuedCerts.length === 0 && (
         <motion.div
-          className="bg-card rounded-xl p-12 shadow-card border border-border/50 text-center"
+          className="bg-white dark:bg-slate-900 rounded-2xl p-12 shadow-card border border-border text-center"
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
         >
-          <Award className="w-16 h-16 text-muted-foreground mx-auto mb-4" />
-          <h3 className="font-display font-semibold text-lg mb-2">No certificates yet</h3>
-          <p className="text-muted-foreground">Complete approved tasks to earn and view certificates</p>
+          <div className="w-20 h-20 rounded-2xl bg-amber-50 dark:bg-amber-950/30 flex items-center justify-center mx-auto mb-5">
+            <Award className="w-10 h-10 text-amber-500" />
+          </div>
+          <h3 className="font-display font-bold text-xl text-foreground mb-2">No certificates yet</h3>
+          <p className="text-muted-foreground text-sm max-w-sm mx-auto">
+            Complete sessions, submit tasks, and get them approved by your teacher to earn certificates.
+          </p>
         </motion.div>
+      )}
+
+      {/* Earned as learner */}
+      {earnedCerts.length > 0 && (
+        <div>
+          <div className="flex items-center gap-2 mb-4">
+            <GraduationCap className="w-4 h-4 text-amber-500" />
+            <h2 className="text-sm font-semibold text-muted-foreground uppercase tracking-widest">
+              My Earned Certificates <span className="text-foreground">({earnedCerts.length})</span>
+            </h2>
+          </div>
+          {renderCertGrid(earnedCerts, false)}
+        </div>
+      )}
+
+      {/* Issued as teacher */}
+      {issuedCerts.length > 0 && (
+        <div>
+          <div className="flex items-center gap-2 mb-4">
+            <Award className="w-4 h-4 text-teal-500" />
+            <h2 className="text-sm font-semibold text-muted-foreground uppercase tracking-widest">
+              Certificates I Issued <span className="text-foreground">({issuedCerts.length})</span>
+            </h2>
+          </div>
+          {renderCertGrid(issuedCerts, true)}
+        </div>
       )}
     </div>
   );

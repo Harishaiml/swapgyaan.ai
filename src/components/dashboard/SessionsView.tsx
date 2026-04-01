@@ -1,13 +1,15 @@
 import { useState, useEffect, useMemo } from "react";
 import { motion } from "framer-motion";
-import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
-import { Video, ExternalLink, Calendar, Clock, User, BookOpen, Upload, FileText, CheckCircle, XCircle, Timer } from "lucide-react";
+import {
+  Video, ExternalLink, Calendar, Clock, User, BookOpen, Upload,
+  FileText, CheckCircle, XCircle, Timer, Loader2, Plus, ClipboardList
+} from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { toast } from "sonner";
-import { generateCertificate, downloadCertificate } from "@/utils/certificateGenerator";
+import { generateCertificate } from "@/utils/certificateGenerator";
 
 const SessionsView = () => {
   const { user } = useAuth();
@@ -17,6 +19,7 @@ const SessionsView = () => {
   const [textAnswers, setTextAnswers] = useState<Record<string, string>>({});
   const [taskForms, setTaskForms] = useState<Record<string, { title: string; description: string }>>({});
   const [now, setNow] = useState(Date.now());
+  const [activeFilter, setActiveFilter] = useState<"all" | "scheduled" | "completed" | "cancelled">("all");
 
   useEffect(() => {
     const timer = setInterval(() => setNow(Date.now()), 1000);
@@ -57,7 +60,6 @@ const SessionsView = () => {
       slotMap = Object.fromEntries((slots || []).map(s => [s.id, s]));
     }
 
-    // Load submissions for sessions
     const sessionIds = data.map(s => s.id);
     const { data: submissions } = await supabase.from("task_submissions").select("*").in("session_id", sessionIds);
     const submissionMap = Object.fromEntries((submissions || []).map(s => [s.session_id, s]));
@@ -82,27 +84,17 @@ const SessionsView = () => {
 
   const cancelSession = async (id: string) => {
     if (!user) return;
-    
-    // Find the session to get its slot_id
     const session = sessions.find(s => s.id === id);
-
     const { error } = await supabase
       .from("sessions")
       .update({ status: "cancelled" })
       .eq("id", id)
       .eq("teacher_id", user.id);
 
-    if (error) {
-      toast.error(error.message || "Failed to cancel session");
-      return;
-    }
+    if (error) { toast.error(error.message || "Failed to cancel session"); return; }
 
-    // Free up the slot so the teacher can reuse or delete it
     if (session?.slot_id) {
-      const { error: slotError } = await supabase
-        .from("teacher_slots")
-        .update({ is_booked: false, booked_by: null } as any)
-        .eq("id", session.slot_id);
+      await supabase.from("teacher_slots").update({ is_booked: false, booked_by: null } as any).eq("id", session.slot_id);
     }
 
     toast.success("Session cancelled");
@@ -111,10 +103,7 @@ const SessionsView = () => {
 
   const assignTask = async (sessionId: string) => {
     const form = taskForms[sessionId];
-    if (!form?.title?.trim() || !form?.description?.trim()) {
-      toast.error("Fill task title and description");
-      return;
-    }
+    if (!form?.title?.trim() || !form?.description?.trim()) { toast.error("Fill task title and description"); return; }
     const { error } = await supabase.from("sessions").update({
       task_title: form.title,
       task_description: form.description,
@@ -122,7 +111,7 @@ const SessionsView = () => {
     }).eq("id", sessionId);
     if (error) toast.error(error.message);
     else {
-      toast.success("Task assigned!");
+      toast.success("Task assigned! ✅");
       setTaskForms(prev => { const n = { ...prev }; delete n[sessionId]; return n; });
     }
   };
@@ -135,7 +124,6 @@ const SessionsView = () => {
     if (uploadError) { toast.error("Upload failed: " + uploadError.message); setSubmitting(null); return; }
 
     const { data: urlData } = supabase.storage.from("task-submissions").getPublicUrl(filePath);
-
     const { error } = await supabase.from("task_submissions").insert({
       session_id: sessionId,
       learner_id: user.id,
@@ -143,10 +131,7 @@ const SessionsView = () => {
       status: "pending",
     } as any);
     if (error) toast.error(error.message);
-    else {
-      toast.success("File submitted!");
-      loadSessions();
-    }
+    else { toast.success("File submitted! ✅"); loadSessions(); }
     setSubmitting(null);
   };
 
@@ -164,9 +149,7 @@ const SessionsView = () => {
     } as any);
     if (error) toast.error(error.message);
     else {
-      toast.success("Answer submitted!");
-
-      // Auto-evaluate if it looks like code
+      toast.success("Answer submitted! ✅");
       const session = sessions.find(s => s.id === sessionId);
       if (session?.task_description) {
         try {
@@ -175,7 +158,7 @@ const SessionsView = () => {
           });
           if (resp.data?.pass) toast.success(`Auto-evaluated: Score ${resp.data.score}/100 ✅`);
           else if (resp.data?.feedback) toast("Feedback: " + resp.data.feedback);
-        } catch { /* manual review fallback */ }
+        } catch { /* fallback */ }
       }
       loadSessions();
     }
@@ -190,38 +173,27 @@ const SessionsView = () => {
 
     const { error: approveError } = await supabase
       .from("sessions")
-      .update({
-        task_status: "approved",
-        status: "completed",
-      })
+      .update({ task_status: "approved", status: "completed" })
       .eq("id", sessionId)
       .eq("teacher_id", user.id);
 
-    if (approveError) {
-      toast.error(approveError.message || "Only the teacher can approve this session");
-      return;
-    }
+    if (approveError) { toast.error(approveError.message || "Only the teacher can approve this session"); return; }
 
     if (session.submission) {
       await supabase.from("task_submissions").update({ status: "approved" } as any).eq("id", session.submission.id);
     }
 
-    // Duplicate-safe lookup: keep one certificate per session
-    const { data: existingCert, error: existingCertError } = await supabase
+    const { data: existingCerts } = await supabase
       .from("certificates")
       .select("id, certificate_id")
       .eq("session_id", sessionId)
-      .maybeSingle();
+      .order("created_at", { ascending: false })
+      .limit(1);
 
-    if (existingCertError) {
-      console.error("Certificate lookup error:", existingCertError);
-      toast.error("Failed to check existing certificate: " + (existingCertError.message || "Unknown error"));
-      return;
-    }
+    const existingCert = existingCerts?.[0] || null;
+    const certId = existingCert?.certificate_id ||
+      `SG-${Date.now()}-${Math.random().toString(36).substring(2, 8).toUpperCase()}`;
 
-    const certId = existingCert?.certificate_id || `SG-${Date.now()}-${Math.random().toString(36).substring(2, 8).toUpperCase()}`;
-
-    // Generate DOCX locally
     let docBlob: Blob | null = null;
     let pdfUrl = "";
 
@@ -229,41 +201,36 @@ const SessionsView = () => {
       docBlob = await generateCertificate({
         learnerName: session.learner_name,
         teacherName: session.teacher_name,
-        skillName: session.skill,
+        skillName: session.skill || session.task_title || "Skill",
         date: new Date().toLocaleDateString("en-US", { year: "numeric", month: "long", day: "numeric" }),
         certificateId: certId,
       });
-
-      // Upload to storage as DOCX (can be converted to PDF later via edge function)
-      const fileName = `${certId}-${session.learner_name}-${session.skill}.docx`;
-      const { error: uploadError } = await supabase.storage
-        .from("certificates")
-        .upload(fileName, docBlob, {
-          contentType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-        });
-
-      if (uploadError) {
-        console.error("Certificate upload error:", uploadError);
-        toast.error("Certificate uploaded locally but storage failed. Try again.");
-      } else {
-        // Get public URL
-        const { data: urlData } = supabase.storage.from("certificates").getPublicUrl(fileName);
-        pdfUrl = urlData.publicUrl;
-        console.log("Certificate uploaded to storage:", pdfUrl);
-      }
     } catch (error) {
-      console.error("Certificate generation error:", error);
-      toast.error("Certificate generation failed");
+      toast.error("Certificate generation failed: " + (error instanceof Error ? error.message : String(error)));
       loadSessions();
       return;
     }
 
-    // Save certificate metadata to DB (no ON CONFLICT dependency)
+    try {
+      const safeSkill = (session.skill || "skill").replace(/[^a-zA-Z0-9-_]/g, "_");
+      const safeName = (session.learner_name || "learner").replace(/[^a-zA-Z0-9-_]/g, "_");
+      const fileName = `${certId}-${safeName}-${safeSkill}.pdf`;
+
+      const { error: uploadError } = await supabase.storage
+        .from("certificates")
+        .upload(fileName, docBlob!, { contentType: "application/pdf", upsert: true });
+
+      if (!uploadError) {
+        const { data: urlData } = supabase.storage.from("certificates").getPublicUrl(fileName);
+        pdfUrl = urlData.publicUrl;
+      }
+    } catch { }
+
     const payload = {
       certificate_id: certId,
       user_id: session.learner_id,
       session_id: sessionId,
-      skill_name: session.skill,
+      skill_name: session.skill || session.task_title || "Skill",
       mentor_name: session.teacher_name,
       pdf_url: pdfUrl,
     };
@@ -272,19 +239,9 @@ const SessionsView = () => {
       ? await supabase.from("certificates").update(payload).eq("id", existingCert.id)
       : await supabase.from("certificates").insert(payload);
 
-    if (certDbError) {
-      console.error("Certificate DB save error:", certDbError);
-      toast.error("Failed to save certificate metadata: " + (certDbError.message || "Unknown error"));
-      loadSessions();
-      return;
-    }
+    if (certDbError) toast.error("Certificate DB save failed: " + (certDbError.message || "Unknown error"));
 
-    // Prompt teacher to download
-    if (docBlob) {
-      downloadCertificate(docBlob, `${session.learner_name}-${session.skill}-certificate.docx`);
-    }
-
-    toast.success("Approved and certificate generated! 🎓 Learner can now download from their Certificates page.");
+    toast.success("✅ Task approved — Certificate generated!");
     loadSessions();
   };
 
@@ -304,170 +261,315 @@ const SessionsView = () => {
     return `${mins}m remaining`;
   };
 
-  if (loading) return <div className="text-muted-foreground">Loading sessions...</div>;
+  const statusConfig: Record<string, string> = {
+    scheduled: "badge-scheduled",
+    completed: "badge-completed",
+    cancelled: "badge-cancelled",
+  };
+
+  const filteredSessions = sessions.filter(s =>
+    activeFilter === "all" ? true : s.status === activeFilter
+  );
+
+  const counts = {
+    all: sessions.length,
+    scheduled: sessions.filter(s => s.status === "scheduled").length,
+    completed: sessions.filter(s => s.status === "completed").length,
+    cancelled: sessions.filter(s => s.status === "cancelled").length,
+  };
+
+  if (loading) {
+    return (
+      <div className="space-y-4">
+        {[1, 2].map(i => (
+          <div key={i} className="bg-white dark:bg-slate-900 rounded-xl p-5 shadow-card border border-border animate-pulse">
+            <div className="flex gap-4">
+              <div className="w-12 h-12 rounded-xl bg-muted shrink-0" />
+              <div className="flex-1 space-y-2">
+                <div className="h-4 bg-muted rounded w-1/3" />
+                <div className="h-3 bg-muted rounded w-1/2" />
+                <div className="flex gap-2 mt-3">
+                  <div className="h-8 bg-muted rounded-lg w-20" />
+                  <div className="h-8 bg-muted rounded-lg w-28" />
+                </div>
+              </div>
+            </div>
+          </div>
+        ))}
+      </div>
+    );
+  }
 
   return (
-    <div>
-      <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }}>
-        <h1 className="text-3xl font-bold font-display mb-1">My Sessions</h1>
-        <p className="text-muted-foreground mb-8">Your learning and teaching sessions</p>
-      </motion.div>
+    <div className="space-y-6">
+      {/* Header */}
+      <div>
+        <h1 className="text-2xl font-bold font-display text-foreground mb-1">Sessions</h1>
+        <p className="text-muted-foreground text-sm">Your learning and teaching sessions</p>
+      </div>
 
-      {sessions.length === 0 ? (
-        <motion.div className="bg-card rounded-xl p-8 shadow-card border border-border/50 text-center" initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }}>
-          <Video className="w-12 h-12 text-muted-foreground mx-auto mb-3" />
-          <h3 className="font-display font-semibold text-lg mb-1">No sessions yet</h3>
+      {/* Filter Tabs */}
+      <div className="flex gap-1 p-1 bg-muted rounded-xl w-fit flex-wrap">
+        {(["all", "scheduled", "completed", "cancelled"] as const).map(filter => (
+          <button
+            key={filter}
+            onClick={() => setActiveFilter(filter)}
+            className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all duration-200 capitalize ${
+              activeFilter === filter
+                ? "bg-white dark:bg-slate-900 text-foreground shadow-xs"
+                : "text-muted-foreground hover:text-foreground"
+            }`}
+          >
+            {filter} {counts[filter] > 0 && <span className="ml-1 opacity-60">({counts[filter]})</span>}
+          </button>
+        ))}
+      </div>
+
+      {/* Empty state */}
+      {filteredSessions.length === 0 && (
+        <div className="bg-white dark:bg-slate-900 rounded-2xl p-12 shadow-card border border-border text-center">
+          <div className="w-16 h-16 rounded-2xl bg-blue-50 dark:bg-blue-950/30 flex items-center justify-center mx-auto mb-4">
+            <Video className="w-8 h-8 text-blue-600 dark:text-blue-400" />
+          </div>
+          <h3 className="font-display font-semibold text-lg text-foreground mb-2">No sessions yet</h3>
           <p className="text-muted-foreground text-sm">Book a slot from a matched teacher to start learning!</p>
-        </motion.div>
-      ) : (
-        <div className="space-y-4">
-          {sessions.map((session, i) => {
-            const countdown = getCountdown(session);
-            const isTeacher = session.role === "Teaching";
-            return (
-              <motion.div
-                key={session.id}
-                className="bg-card rounded-xl p-6 shadow-card border border-border/50"
-                initial={{ opacity: 0, y: 20 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ delay: i * 0.05 }}
-              >
-                <div className="flex flex-col gap-4">
-                  {/* Header */}
-                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-                    <div className="flex items-start gap-4">
-                      <div className={`w-12 h-12 rounded-lg flex items-center justify-center shrink-0 ${isTeacher ? "bg-gradient-secondary" : "bg-gradient-primary"}`}>
-                        <Video className="w-6 h-6 text-primary-foreground" />
+        </div>
+      )}
+
+      {/* Session Cards */}
+      <div className="space-y-4">
+        {filteredSessions.map((session, i) => {
+          const countdown = getCountdown(session);
+          const isTeacher = session.role === "Teaching";
+
+          return (
+            <motion.div
+              key={session.id}
+              className="bg-white dark:bg-slate-900 rounded-xl shadow-card border border-border overflow-hidden hover:shadow-elevated transition-all duration-200"
+              initial={{ opacity: 0, y: 16 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: i * 0.05 }}
+            >
+              {/* Session Header */}
+              <div className="p-5">
+                <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-4">
+                  <div className="flex items-start gap-4">
+                    <div className={`w-12 h-12 rounded-xl flex items-center justify-center shrink-0 shadow-sm ${
+                      isTeacher
+                        ? "bg-gradient-to-br from-teal-500 to-cyan-600"
+                        : "bg-gradient-to-br from-blue-500 to-indigo-600"
+                    }`}>
+                      <Video className="w-5 h-5 text-white" />
+                    </div>
+                    <div className="space-y-1.5 min-w-0">
+                      <h3 className="font-semibold font-display text-foreground">{session.skill}</h3>
+                      <p className="text-sm text-muted-foreground">with <span className="font-medium text-foreground">{session.partner}</span></p>
+
+                      {/* Meta info */}
+                      <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground">
+                        <span className="flex items-center gap-1">
+                          <BookOpen className="w-3 h-3" /> {session.teacher_name}
+                        </span>
+                        <span className="flex items-center gap-1">
+                          <User className="w-3 h-3" /> {session.learner_name}
+                        </span>
                       </div>
-                      <div className="space-y-2">
-                        <div>
-                          <h3 className="font-semibold font-display text-lg">{session.skill}</h3>
-                          <p className="text-sm text-muted-foreground">with {session.partner}</p>
-                        </div>
-                        <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground">
-                          <span className="flex items-center gap-1"><BookOpen className="w-3 h-3" /> Teacher: {session.teacher_name}</span>
-                          <span className="flex items-center gap-1"><User className="w-3 h-3" /> Learner: {session.learner_name}</span>
-                        </div>
-                        {(session.scheduled_date || session.scheduled_time) && (
-                          <div className="flex items-center gap-3 text-xs text-muted-foreground">
-                            {session.scheduled_date && <span className="flex items-center gap-1"><Calendar className="w-3 h-3" /> {session.scheduled_date}</span>}
-                            {session.scheduled_time && <span className="flex items-center gap-1"><Clock className="w-3 h-3" /> {session.scheduled_time}</span>}
-                          </div>
-                        )}
-                        {countdown && (
-                          <div className="flex items-center gap-1 text-xs font-medium">
-                            <Timer className="w-3 h-3" />
-                            <span className={countdown === "ended" ? "text-destructive" : "text-primary"}>{countdown === "ended" ? "Session Ended" : countdown}</span>
-                          </div>
-                        )}
-                        <div className="flex flex-wrap gap-2">
-                          <span className={`text-xs px-2 py-0.5 rounded-full ${isTeacher ? "bg-secondary/20 text-secondary" : "bg-primary/10 text-primary"}`}>{session.role}</span>
-                          <span className={`text-xs px-2 py-0.5 rounded-full ${session.status === "completed" || session.status === "cancelled" ? "bg-muted text-muted-foreground" : "bg-accent/20 text-accent-foreground"}`}>{session.status}</span>
-                          {session.task_status && session.task_status !== "none" && (
-                            <span className="text-xs px-2 py-0.5 rounded-full bg-primary/10 text-primary">Task: {session.task_status}</span>
+
+                      {/* Date/Time */}
+                      {(session.scheduled_date || session.scheduled_time) && (
+                        <div className="flex items-center gap-3 text-xs text-muted-foreground">
+                          {session.scheduled_date && (
+                            <span className="flex items-center gap-1">
+                              <Calendar className="w-3 h-3" />{session.scheduled_date}
+                            </span>
+                          )}
+                          {session.scheduled_time && (
+                            <span className="flex items-center gap-1">
+                              <Clock className="w-3 h-3" />{session.scheduled_time}
+                            </span>
                           )}
                         </div>
+                      )}
+
+                      {/* Countdown */}
+                      {countdown && (
+                        <div className="flex items-center gap-1 text-xs font-medium">
+                          <Timer className="w-3 h-3" />
+                          <span className={countdown === "ended" ? "text-destructive" : "text-primary"}>
+                            {countdown === "ended" ? "Session Ended" : countdown}
+                          </span>
+                        </div>
+                      )}
+
+                      {/* Status badges */}
+                      <div className="flex flex-wrap gap-1.5">
+                        <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ${
+                          isTeacher
+                            ? "bg-teal-50 text-teal-700 border border-teal-200/60 dark:bg-teal-950/30 dark:text-teal-400 dark:border-teal-800/40"
+                            : "bg-blue-50 text-blue-700 border border-blue-200/60 dark:bg-blue-950/30 dark:text-blue-400 dark:border-blue-800/40"
+                        }`}>
+                          {session.role}
+                        </span>
+                        <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ${statusConfig[session.status] || "badge-pending"}`}>
+                          {session.status}
+                        </span>
+                        {session.task_status && session.task_status !== "none" && (
+                          <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-violet-50 text-violet-700 border border-violet-200/60 dark:bg-violet-950/30 dark:text-violet-400 dark:border-violet-800/40">
+                            Task: {session.task_status}
+                          </span>
+                        )}
                       </div>
-                    </div>
-                    <div className="flex gap-2 shrink-0">
-                      {session.status === "scheduled" && countdown !== "ended" && (
-                        <a href={session.meeting_link} target="_blank" rel="noopener noreferrer">
-                          <Button variant="hero" size="sm"><ExternalLink className="w-4 h-4" /> Join</Button>
-                        </a>
-                      )}
-                      {isTeacher && session.status === "scheduled" && (
-                        <Button variant="ghost" size="sm" onClick={() => cancelSession(session.id)}>
-                          <XCircle className="w-4 h-4 text-destructive" /> Cancel Session
-                        </Button>
-                      )}
                     </div>
                   </div>
 
-                  {/* Teacher: Assign Task */}
-                  {isTeacher && session.status === "scheduled" && (!session.task_status || session.task_status === "none") && (
-                    <div className="border-t border-border/50 pt-4 space-y-3">
-                      <p className="text-sm font-medium">Assign a Task</p>
-                      <Input
-                        placeholder="Task title"
-                        value={taskForms[session.id]?.title || ""}
-                        onChange={e => setTaskForms(prev => ({ ...prev, [session.id]: { ...prev[session.id], title: e.target.value, description: prev[session.id]?.description || "" } }))}
-                      />
-                      <Textarea
-                        placeholder="Task description / instructions..."
-                        value={taskForms[session.id]?.description || ""}
-                        onChange={e => setTaskForms(prev => ({ ...prev, [session.id]: { ...prev[session.id], description: e.target.value, title: prev[session.id]?.title || "" } }))}
-                      />
-                      <Button size="sm" onClick={() => assignTask(session.id)}>Assign Task</Button>
-                    </div>
-                  )}
-
-                  {/* Learner: Submit */}
-                  {!isTeacher && session.task_status === "assigned" && !session.submission && (
-                    <div className="border-t border-border/50 pt-4 space-y-3">
-                      <p className="text-sm font-medium">📝 Task: {session.task_title}</p>
-                      <p className="text-xs text-muted-foreground">{session.task_description}</p>
-                      <div className="flex flex-col gap-3">
-                        <div>
-                          <label className="text-xs text-muted-foreground mb-1 block">Upload file (PDF/code)</label>
-                          <Input
-                            type="file"
-                            accept=".pdf,.doc,.docx,.py,.js,.ts,.jsx,.tsx,.txt,.zip"
-                            onChange={e => e.target.files?.[0] && handleFileUpload(session.id, e.target.files[0])}
-                            disabled={submitting === session.id}
-                          />
-                        </div>
-                        <div className="text-xs text-center text-muted-foreground">— or write code —</div>
-                        <Textarea
-                          placeholder="Write your code / answer here..."
-                          className="font-mono text-xs"
-                          rows={6}
-                          value={textAnswers[session.id] || ""}
-                          onChange={e => setTextAnswers(prev => ({ ...prev, [session.id]: e.target.value }))}
-                        />
-                        <Button size="sm" onClick={() => handleTextSubmit(session.id)} disabled={submitting === session.id}>
-                          <Upload className="w-4 h-4" /> Submit Answer
-                        </Button>
-                      </div>
-                    </div>
-                  )}
-
-                  {/* Teacher: Review submission */}
-                  {isTeacher && session.submission && session.submission.status === "pending" && (
-                    <div className="border-t border-border/50 pt-4 space-y-3">
-                      <p className="text-sm font-medium">📋 Submission to Review</p>
-                      {session.submission.file_url && (
-                        <a href={session.submission.file_url} target="_blank" rel="noopener noreferrer" className="flex items-center gap-2 text-sm text-primary hover:underline">
-                          <FileText className="w-4 h-4" /> View uploaded file
-                        </a>
-                      )}
-                      {session.submission.text_answer && (
-                        <pre className="bg-muted rounded-lg p-3 text-xs font-mono overflow-x-auto max-h-48">{session.submission.text_answer}</pre>
-                      )}
-                      <div className="flex gap-2">
-                        <Button size="sm" variant="hero" onClick={() => approveSubmission(session.id)}>
-                          <CheckCircle className="w-4 h-4" /> Approve & Certify
-                        </Button>
-                      </div>
-                    </div>
-                  )}
-
-                  {/* Status indicators for submissions */}
-                  {session.submission && session.submission.status === "approved" && (
-                    <div className="border-t border-border/50 pt-3 flex items-center gap-2 text-sm text-primary">
-                      <CheckCircle className="w-4 h-4" /> Task approved — Certificate generated! 🎓
-                    </div>
-                  )}
-                  {session.submission && session.submission.status === "needs_revision" && (
-                    <div className="border-t border-border/50 pt-3 flex items-center gap-2 text-sm text-destructive">
-                      <XCircle className="w-4 h-4" /> Needs revision — please resubmit
-                    </div>
-                  )}
+                  {/* Action Buttons */}
+                  <div className="flex gap-2 shrink-0">
+                    {session.status === "scheduled" && countdown !== "ended" && (
+                      <a href={session.meeting_link} target="_blank" rel="noopener noreferrer">
+                        <button className="inline-flex items-center gap-2 bg-gradient-to-r from-blue-600 to-blue-700 hover:from-blue-700 hover:to-blue-800 text-white text-xs font-semibold px-4 py-2 rounded-lg transition-all duration-200 shadow-sm hover:shadow-md">
+                          <ExternalLink className="w-3.5 h-3.5" /> Join Meeting
+                        </button>
+                      </a>
+                    )}
+                    {isTeacher && session.status === "scheduled" && (
+                      <button
+                        onClick={() => cancelSession(session.id)}
+                        className="inline-flex items-center gap-1.5 text-xs font-medium text-muted-foreground hover:text-destructive px-3 py-2 rounded-lg hover:bg-destructive/5 transition-all duration-200"
+                      >
+                        <XCircle className="w-3.5 h-3.5" /> Cancel
+                      </button>
+                    )}
+                  </div>
                 </div>
-              </motion.div>
-            );
-          })}
-        </div>
-      )}
+              </div>
+
+              {/* Task sections */}
+              {/* Teacher: Assign Task */}
+              {isTeacher && session.status === "scheduled" && (!session.task_status || session.task_status === "none") && (
+                <div className="border-t border-border/50 p-5 bg-muted/30">
+                  <div className="flex items-center gap-2 mb-3">
+                    <ClipboardList className="w-4 h-4 text-violet-600" />
+                    <p className="text-sm font-semibold text-foreground">Assign a Task</p>
+                  </div>
+                  <div className="space-y-2">
+                    <Input
+                      placeholder="Task title"
+                      value={taskForms[session.id]?.title || ""}
+                      onChange={e => setTaskForms(prev => ({ ...prev, [session.id]: { ...prev[session.id], title: e.target.value, description: prev[session.id]?.description || "" } }))}
+                      className="rounded-xl text-sm"
+                    />
+                    <Textarea
+                      placeholder="Task description / instructions..."
+                      value={taskForms[session.id]?.description || ""}
+                      onChange={e => setTaskForms(prev => ({ ...prev, [session.id]: { ...prev[session.id], description: e.target.value, title: prev[session.id]?.title || "" } }))}
+                      className="rounded-xl text-sm resize-none"
+                      rows={3}
+                    />
+                    <button
+                      onClick={() => assignTask(session.id)}
+                      className="inline-flex items-center gap-2 bg-violet-500 hover:bg-violet-600 text-white text-xs font-semibold px-4 py-2 rounded-lg transition-colors"
+                    >
+                      <Plus className="w-3.5 h-3.5" /> Assign Task
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {/* Learner: Submit Task */}
+              {!isTeacher && session.task_status === "assigned" && !session.submission && (
+                <div className="border-t border-border/50 p-5 bg-muted/30">
+                  <div className="flex items-center gap-2 mb-3">
+                    <ClipboardList className="w-4 h-4 text-orange-600" />
+                    <p className="text-sm font-semibold text-foreground">📝 {session.task_title}</p>
+                  </div>
+                  <p className="text-xs text-muted-foreground mb-4 leading-relaxed">{session.task_description}</p>
+                  <div className="space-y-3">
+                    <div>
+                      <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Upload file (PDF/code)</label>
+                      <Input
+                        type="file"
+                        accept=".pdf,.doc,.docx,.py,.js,.ts,.jsx,.tsx,.txt,.zip"
+                        onChange={e => e.target.files?.[0] && handleFileUpload(session.id, e.target.files[0])}
+                        disabled={submitting === session.id}
+                        className="rounded-xl text-xs"
+                      />
+                    </div>
+                    <div className="flex items-center gap-3">
+                      <div className="flex-1 h-px bg-border" />
+                      <span className="text-xs text-muted-foreground">or write code</span>
+                      <div className="flex-1 h-px bg-border" />
+                    </div>
+                    <Textarea
+                      placeholder="Write your code / answer here..."
+                      className="font-mono text-xs rounded-xl resize-none"
+                      rows={6}
+                      value={textAnswers[session.id] || ""}
+                      onChange={e => setTextAnswers(prev => ({ ...prev, [session.id]: e.target.value }))}
+                    />
+                    <button
+                      onClick={() => handleTextSubmit(session.id)}
+                      disabled={submitting === session.id}
+                      className="inline-flex items-center gap-2 bg-orange-500 hover:bg-orange-600 text-white text-xs font-semibold px-4 py-2 rounded-lg transition-colors disabled:opacity-50"
+                    >
+                      {submitting === session.id ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Upload className="w-3.5 h-3.5" />}
+                      Submit Answer
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {/* Teacher: Review submission */}
+              {isTeacher && session.submission && session.submission.status === "pending" && session.task_status !== "approved" && (
+                <div className="border-t border-border/50 p-5 bg-muted/30">
+                  <div className="flex items-center gap-2 mb-3">
+                    <FileText className="w-4 h-4 text-blue-600" />
+                    <p className="text-sm font-semibold text-foreground">📋 Submission to Review</p>
+                  </div>
+                  {session.submission.file_url && (
+                    <a href={session.submission.file_url} target="_blank" rel="noopener noreferrer"
+                      className="inline-flex items-center gap-2 text-sm text-primary hover:underline mb-3">
+                      <FileText className="w-4 h-4" /> View uploaded file
+                    </a>
+                  )}
+                  {session.submission.text_answer && (
+                    <pre className="bg-slate-900 dark:bg-slate-950 text-slate-100 rounded-xl p-4 text-xs font-mono overflow-x-auto max-h-48 mb-3">
+                      {session.submission.text_answer}
+                    </pre>
+                  )}
+                  <button
+                    onClick={() => approveSubmission(session.id)}
+                    className="inline-flex items-center gap-2 bg-gradient-to-r from-emerald-500 to-emerald-600 hover:from-emerald-600 hover:to-emerald-700 text-white text-xs font-semibold px-4 py-2 rounded-lg transition-all duration-200 shadow-sm"
+                  >
+                    <CheckCircle className="w-3.5 h-3.5" /> Approve & Generate Certificate
+                  </button>
+                </div>
+              )}
+
+              {/* Approved badge */}
+              {(session.task_status === "approved" || (session.submission && session.submission.status === "approved")) && (
+                <div className="border-t border-border/50 p-4 bg-emerald-50 dark:bg-emerald-950/20">
+                  <div className="flex items-center gap-3 text-emerald-700 dark:text-emerald-400">
+                    <CheckCircle className="w-5 h-5 flex-shrink-0" />
+                    <div>
+                      <p className="font-semibold text-sm">Task Approved — Certificate Generated! 🎓</p>
+                      <p className="text-xs opacity-80 mt-0.5">
+                        {isTeacher ? "Learner can download from their Certificates page." : "Download your certificate from the Certificates page."}
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {session.submission && session.submission.status === "needs_revision" && (
+                <div className="border-t border-border/50 p-4 bg-red-50 dark:bg-red-950/20 flex items-center gap-2 text-red-600 dark:text-red-400">
+                  <XCircle className="w-4 h-4" />
+                  <span className="text-sm font-medium">Needs revision — please resubmit</span>
+                </div>
+              )}
+            </motion.div>
+          );
+        })}
+      </div>
     </div>
   );
 };

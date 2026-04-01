@@ -8,14 +8,13 @@ export default {
     container: {
       center: true,
       padding: "2rem",
-      screens: {
-        "2xl": "1400px",
-      },
+      screens: { "2xl": "1400px" },
     },
     extend: {
       fontFamily: {
         display: ['Space Grotesk', 'sans-serif'],
         body: ['Inter', 'sans-serif'],
+        sans: ['Inter', 'sans-serif'],
       },
       colors: {
         border: "hsl(var(--border))",
@@ -26,10 +25,20 @@ export default {
         primary: {
           DEFAULT: "hsl(var(--primary))",
           foreground: "hsl(var(--primary-foreground))",
+          50: "#eff6ff",
+          100: "#dbeafe",
+          200: "#bfdbfe",
+          500: "#3b82f6",
+          600: "#2563eb",
+          700: "#1d4ed8",
         },
         secondary: {
           DEFAULT: "hsl(var(--secondary))",
           foreground: "hsl(var(--secondary-foreground))",
+          50: "#f0fdfa",
+          100: "#ccfbf1",
+          500: "#14b8a6",
+          600: "#0d9488",
         },
         destructive: {
           DEFAULT: "hsl(var(--destructive))",
@@ -66,6 +75,14 @@ export default {
         lg: "var(--radius)",
         md: "calc(var(--radius) - 2px)",
         sm: "calc(var(--radius) - 4px)",
+        xl: "1rem",
+        "2xl": "1.25rem",
+        "3xl": "1.5rem",
+      },
+      spacing: {
+        "18": "4.5rem",
+        "22": "5.5rem",
+        "sidebar": "16rem",
       },
       keyframes: {
         "accordion-down": {
@@ -81,8 +98,16 @@ export default {
           "50%": { transform: "translateY(-10px)" },
         },
         "pulse-glow": {
-          "0%, 100%": { boxShadow: "0 0 20px -5px hsl(262, 83%, 58%, 0.3)" },
-          "50%": { boxShadow: "0 0 40px -5px hsl(262, 83%, 58%, 0.5)" },
+          "0%, 100%": { boxShadow: "0 0 20px -5px rgba(37,99,235,0.3)" },
+          "50%": { boxShadow: "0 0 40px -5px rgba(37,99,235,0.5)" },
+        },
+        "slide-up": {
+          from: { opacity: "0", transform: "translateY(12px)" },
+          to: { opacity: "1", transform: "translateY(0)" },
+        },
+        "typing": {
+          "0%, 100%": { opacity: "0.2" },
+          "50%": { opacity: "1" },
         },
       },
       animation: {
@@ -90,6 +115,21 @@ export default {
         "accordion-up": "accordion-up 0.2s ease-out",
         "float": "float 3s ease-in-out infinite",
         "pulse-glow": "pulse-glow 2s ease-in-out infinite",
+        "slide-up": "slide-up 0.3s ease-out both",
+        "typing": "typing 1.2s ease-in-out infinite",
+      },
+      boxShadow: {
+        "premium": "0 20px 25px -5px rgba(0, 0, 0, 0.05), 0 8px 10px -6px rgba(0, 0, 0, 0.05)",
+        "premium-hover": "0 25px 30px -5px rgba(0, 0, 0, 0.08), 0 12px 15px -6px rgba(0, 0, 0, 0.08)",
+        "card": "0 4px 20px -2px rgba(0, 0, 0, 0.05)",
+        "elevated": "0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04)",
+        "glow": "0 0 20px -5px rgba(37,99,235,0.4)",
+      },
+      transitionDuration: {
+        "250": "250ms",
+      },
+      backdropBlur: {
+        xs: "2px",
       },
     },
   },

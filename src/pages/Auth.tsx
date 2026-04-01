@@ -1,13 +1,11 @@
 import { useState } from "react";
-import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Mail, Lock, User, ArrowLeft } from "lucide-react";
+import { Mail, Lock, User, ArrowLeft, GraduationCap, Loader2, Eye, EyeOff } from "lucide-react";
 import { Link, useNavigate } from "react-router-dom";
-import { motion } from "framer-motion";
+import { motion, AnimatePresence } from "framer-motion";
 import { toast } from "sonner";
 import { useAuth } from "@/contexts/AuthContext";
-import BrandLogo from "@/components/BrandLogo";
 import { APP_NAME } from "@/lib/branding";
 
 const Auth = () => {
@@ -17,10 +15,10 @@ const Auth = () => {
   const [password, setPassword] = useState("");
   const [name, setName] = useState("");
   const [loading, setLoading] = useState(false);
+  const [showPassword, setShowPassword] = useState(false);
   const { signIn, signUp, resetPassword, user } = useAuth();
   const navigate = useNavigate();
 
-  // Redirect if already logged in
   if (user) {
     navigate("/dashboard", { replace: true });
     return null;
@@ -36,7 +34,7 @@ const Auth = () => {
         setIsForgot(false);
       } else if (isLogin) {
         await signIn(email, password);
-        toast.success("Welcome back!");
+        toast.success("Welcome back! 🎉");
         navigate("/dashboard");
       } else {
         await signUp(email, password, name);
@@ -49,89 +47,199 @@ const Auth = () => {
     }
   };
 
+  const formTitle = isForgot ? "Reset password" : isLogin ? "Welcome back" : "Create account";
+  const formSubtitle = isForgot
+    ? "Enter your email to receive a reset link"
+    : isLogin
+    ? "Sign in to continue your learning journey"
+    : "Start swapping skills with peers today";
+
   return (
-    <div className="min-h-screen flex">
-      {/* Left panel */}
-      <div className="hidden lg:flex lg:w-1/2 bg-gradient-hero relative items-center justify-center">
-        <div className="absolute inset-0 bg-[radial-gradient(circle_at_30%_50%,rgba(255,255,255,0.1),transparent)]" />
-        <div className="relative z-10 text-center p-12">
-          <BrandLogo size="lg" showText={false} className="justify-center mb-6" />
-          <h2 className="text-4xl font-bold font-display text-primary-foreground mb-4">{APP_NAME}</h2>
-          <p className="text-primary-foreground/80 text-lg max-w-sm">
-            Learn, Teach, Validate, and Grow Together with AI-powered skill exchange.
-          </p>
+    <div className="min-h-screen flex bg-background">
+      {/* Left panel - decorative */}
+      <div className="hidden lg:flex lg:w-[45%] relative overflow-hidden">
+        {/* Background gradient */}
+        <div className="absolute inset-0 bg-gradient-to-br from-blue-700 via-blue-600 to-teal-600" />
+        <div className="absolute inset-0 bg-[radial-gradient(circle_at_30%_60%,rgba(255,255,255,0.12),transparent)]" />
+        <div className="absolute bottom-0 right-0 w-96 h-96 bg-teal-500/20 rounded-full translate-x-48 translate-y-48" />
+        <div className="absolute top-0 left-0 w-64 h-64 bg-blue-400/20 rounded-full -translate-x-32 -translate-y-32" />
+
+        {/* Dot pattern */}
+        <div className="absolute inset-0 opacity-[0.07]" style={{
+          backgroundImage: "radial-gradient(circle, #fff 1px, transparent 1px)",
+          backgroundSize: "24px 24px",
+        }} />
+
+        <div className="relative z-10 flex flex-col justify-between p-12 w-full">
+          {/* Logo */}
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-xl bg-white/20 flex items-center justify-center border border-white/30">
+              <GraduationCap className="w-5 h-5 text-white" />
+            </div>
+            <span className="font-display font-bold text-white text-lg">{APP_NAME}</span>
+          </div>
+
+          {/* Hero content */}
+          <div>
+            <h2 className="text-4xl font-bold font-display text-white mb-4 leading-tight">
+              Learn by sharing.<br />Grow together.
+            </h2>
+            <p className="text-blue-100 text-base mb-8 leading-relaxed max-w-sm">
+              Connect with peers, swap skills, get AI-powered guidance, and earn verifiable certificates.
+            </p>
+
+            {/* Feature badges */}
+            <div className="space-y-3">
+              {[
+                { emoji: "🤝", text: "Peer-to-peer skill exchange" },
+                { emoji: "🤖", text: "AI tutor for instant help" },
+                { emoji: "🎓", text: "Verifiable certificates" },
+              ].map(({ emoji, text }) => (
+                <div key={text} className="flex items-center gap-3 bg-white/10 border border-white/20 rounded-xl px-4 py-2.5">
+                  <span className="text-lg">{emoji}</span>
+                  <span className="text-white text-sm font-medium">{text}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          <p className="text-blue-200/60 text-xs">© 2025 {APP_NAME}. All rights reserved.</p>
         </div>
       </div>
 
-      {/* Right panel */}
-      <div className="flex-1 flex items-center justify-center p-8">
+      {/* Right panel - form */}
+      <div className="flex-1 flex items-center justify-center p-6 lg:p-12">
         <motion.div
           className="w-full max-w-md"
-          initial={{ opacity: 0, x: 20 }}
-          animate={{ opacity: 1, x: 0 }}
-          transition={{ duration: 0.4 }}
+          initial={{ opacity: 0, y: 16 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.4, ease: "easeOut" }}
         >
-          <div className="flex justify-center lg:hidden mb-6">
-            <BrandLogo size="md" />
+          {/* Mobile logo */}
+          <div className="flex items-center gap-3 mb-8 lg:hidden">
+            <div className="w-9 h-9 rounded-xl bg-gradient-primary flex items-center justify-center shadow-sm">
+              <GraduationCap className="w-4.5 h-4.5 text-white" />
+            </div>
+            <span className="font-display font-bold text-lg text-foreground">{APP_NAME}</span>
           </div>
 
-          <Link to="/" className="inline-flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground mb-8">
-            <ArrowLeft className="w-4 h-4" /> Back to home
+          {/* Back to home */}
+          <Link to="/" className="inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground mb-8 transition-colors group">
+            <ArrowLeft className="w-3.5 h-3.5 group-hover:-translate-x-0.5 transition-transform" />
+            Back to home
           </Link>
 
-          <h1 className="text-3xl font-bold font-display mb-2">
-            {isForgot ? "Reset password" : isLogin ? "Welcome back" : "Create your account"}
-          </h1>
-          <p className="text-muted-foreground mb-8">
-            {isForgot ? "Enter your email to reset" : isLogin ? "Sign in to continue learning" : "Start swapping skills today"}
-          </p>
+          {/* Form header */}
+          <AnimatePresence mode="wait">
+            <motion.div
+              key={formTitle}
+              initial={{ opacity: 0, y: 8 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -8 }}
+              transition={{ duration: 0.2 }}
+              className="mb-8"
+            >
+              <h1 className="text-3xl font-bold font-display text-foreground mb-2">{formTitle}</h1>
+              <p className="text-muted-foreground text-sm">{formSubtitle}</p>
+            </motion.div>
+          </AnimatePresence>
 
+          {/* Form */}
           <form onSubmit={handleSubmit} className="space-y-4">
             {!isLogin && !isForgot && (
-              <div className="space-y-2">
-                <Label htmlFor="name">Full Name</Label>
+              <div className="space-y-1.5">
+                <Label htmlFor="auth-name" className="text-sm font-semibold text-foreground">Full Name</Label>
                 <div className="relative">
                   <User className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-                  <Input id="name" placeholder="Your name" className="pl-10" value={name} onChange={(e) => setName(e.target.value)} required />
+                  <Input
+                    id="auth-name"
+                    placeholder="Your full name"
+                    className="pl-10 h-11 rounded-xl bg-muted/40 border-border focus-visible:ring-primary/30"
+                    value={name}
+                    onChange={(e) => setName(e.target.value)}
+                    required
+                  />
                 </div>
               </div>
             )}
-            <div className="space-y-2">
-              <Label htmlFor="email">Email</Label>
+
+            <div className="space-y-1.5">
+              <Label htmlFor="auth-email" className="text-sm font-semibold text-foreground">Email</Label>
               <div className="relative">
                 <Mail className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-                <Input id="email" type="email" placeholder="you@example.com" className="pl-10" value={email} onChange={(e) => setEmail(e.target.value)} required />
+                <Input
+                  id="auth-email"
+                  type="email"
+                  placeholder="you@example.com"
+                  className="pl-10 h-11 rounded-xl bg-muted/40 border-border focus-visible:ring-primary/30"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  required
+                />
               </div>
             </div>
+
             {!isForgot && (
-              <div className="space-y-2">
-                <Label htmlFor="password">Password</Label>
+              <div className="space-y-1.5">
+                <div className="flex items-center justify-between">
+                  <Label htmlFor="auth-password" className="text-sm font-semibold text-foreground">Password</Label>
+                  {isLogin && !isForgot && (
+                    <button
+                      type="button"
+                      onClick={() => setIsForgot(true)}
+                      className="text-xs text-primary hover:underline font-medium"
+                    >
+                      Forgot password?
+                    </button>
+                  )}
+                </div>
                 <div className="relative">
                   <Lock className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-                  <Input id="password" type="password" placeholder="••••••••" className="pl-10" value={password} onChange={(e) => setPassword(e.target.value)} required minLength={6} />
+                  <Input
+                    id="auth-password"
+                    type={showPassword ? "text" : "password"}
+                    placeholder="••••••••"
+                    className="pl-10 pr-10 h-11 rounded-xl bg-muted/40 border-border focus-visible:ring-primary/30"
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                    required
+                    minLength={6}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowPassword(!showPassword)}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors"
+                  >
+                    {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                  </button>
                 </div>
               </div>
             )}
 
-            <Button variant="hero" className="w-full" size="lg" type="submit" disabled={loading}>
-              {loading ? "Loading..." : isForgot ? "Send Reset Link" : isLogin ? "Sign In" : "Create Account"}
-            </Button>
+            <button
+              type="submit"
+              disabled={loading}
+              className="w-full h-11 mt-2 bg-gradient-to-r from-blue-600 to-blue-700 hover:from-blue-700 hover:to-blue-800 text-white font-semibold text-sm rounded-xl transition-all duration-200 shadow-sm hover:shadow-md disabled:opacity-60 inline-flex items-center justify-center gap-2"
+            >
+              {loading && <Loader2 className="w-4 h-4 animate-spin" />}
+              {loading ? "Please wait..." : isForgot ? "Send Reset Link" : isLogin ? "Sign In" : "Create Account"}
+            </button>
           </form>
 
-          {isLogin && !isForgot && (
-            <button onClick={() => setIsForgot(true)} className="text-sm text-primary hover:underline mt-3 block">
-              Forgot password?
-            </button>
-          )}
-
+          {/* Footer */}
           <p className="text-center text-sm text-muted-foreground mt-6">
             {isForgot ? (
-              <button onClick={() => setIsForgot(false)} className="text-primary hover:underline font-medium">Back to sign in</button>
+              <button onClick={() => setIsForgot(false)} className="text-primary hover:underline font-medium">
+                ← Back to sign in
+              </button>
             ) : (
               <>
                 {isLogin ? "Don't have an account? " : "Already have an account? "}
-                <button onClick={() => setIsLogin(!isLogin)} className="text-primary hover:underline font-medium">
-                  {isLogin ? "Sign up" : "Sign in"}
+                <button
+                  onClick={() => setIsLogin(!isLogin)}
+                  className="text-primary hover:underline font-semibold"
+                >
+                  {isLogin ? "Sign up free" : "Sign in"}
                 </button>
               </>
             )}
