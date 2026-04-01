@@ -1,12 +1,13 @@
 import { useState } from "react";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Mail, Lock, User, ArrowLeft, GraduationCap, Loader2, Eye, EyeOff } from "lucide-react";
+import { Mail, Lock, User, ArrowLeft, Loader2, Eye, EyeOff } from "lucide-react";
 import { Link, useNavigate } from "react-router-dom";
 import { motion, AnimatePresence } from "framer-motion";
 import { toast } from "sonner";
 import { useAuth } from "@/contexts/AuthContext";
 import { APP_NAME } from "@/lib/branding";
+import BrandLogo from "@/components/BrandLogo";
 
 const Auth = () => {
   const [isLogin, setIsLogin] = useState(true);
@@ -72,12 +73,7 @@ const Auth = () => {
 
         <div className="relative z-10 flex flex-col justify-between p-12 w-full">
           {/* Logo */}
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-white/20 flex items-center justify-center border border-white/30">
-              <GraduationCap className="w-5 h-5 text-white" />
-            </div>
-            <span className="font-display font-bold text-white text-lg">{APP_NAME}</span>
-          </div>
+          <BrandLogo size="md" className="!gap-3" />
 
           {/* Hero content */}
           <div>
@@ -116,11 +112,8 @@ const Auth = () => {
           transition={{ duration: 0.4, ease: "easeOut" }}
         >
           {/* Mobile logo */}
-          <div className="flex items-center gap-3 mb-8 lg:hidden">
-            <div className="w-9 h-9 rounded-xl bg-gradient-primary flex items-center justify-center shadow-sm">
-              <GraduationCap className="w-4.5 h-4.5 text-white" />
-            </div>
-            <span className="font-display font-bold text-lg text-foreground">{APP_NAME}</span>
+          <div className="mb-8 lg:hidden">
+            <BrandLogo size="md" />
           </div>
 
           {/* Back to home */}

@@ -1,7 +1,7 @@
 import { Link } from "react-router-dom";
-import { GraduationCap, Menu, X } from "lucide-react";
+import { Menu, X } from "lucide-react";
 import { useState } from "react";
-import { APP_NAME } from "@/lib/branding";
+import BrandLogo from "@/components/BrandLogo";
 
 const Navbar = () => {
   const [menuOpen, setMenuOpen] = useState(false);
@@ -11,12 +11,7 @@ const Navbar = () => {
       <div className="absolute inset-0 bg-white/90 dark:bg-slate-900/90 backdrop-blur-md border-b border-border/50 shadow-xs" />
       <nav className="relative container h-full flex items-center justify-between gap-4">
         {/* Logo */}
-        <Link to="/" className="flex items-center gap-2.5 group">
-          <div className="w-8 h-8 rounded-lg bg-gradient-primary flex items-center justify-center shadow-sm group-hover:shadow-glow transition-shadow duration-300">
-            <GraduationCap className="w-4.5 h-4.5 text-white" />
-          </div>
-          <span className="font-display font-bold text-base text-foreground">{APP_NAME}</span>
-        </Link>
+        <BrandLogo size="md" />
 
         {/* Desktop nav */}
         <div className="hidden md:flex items-center gap-1">
