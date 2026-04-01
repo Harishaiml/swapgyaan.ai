@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Mail, Lock, User, ArrowLeft, Loader2, Eye, EyeOff } from "lucide-react";
+import { Mail, Lock, User, ArrowLeft, GraduationCap, Loader2, Eye, EyeOff } from "lucide-react";
 import { Link, useNavigate } from "react-router-dom";
 import { motion, AnimatePresence } from "framer-motion";
 import { toast } from "sonner";
@@ -73,7 +73,9 @@ const Auth = () => {
 
         <div className="relative z-10 flex flex-col justify-between p-12 w-full">
           {/* Logo */}
-          <BrandLogo size="md" className="!gap-3" />
+          <div className="flex items-center gap-3">
+            <BrandLogo size="md" className="brightness-200 grayscale" />
+          </div>
 
           {/* Hero content */}
           <div>
@@ -112,7 +114,7 @@ const Auth = () => {
           transition={{ duration: 0.4, ease: "easeOut" }}
         >
           {/* Mobile logo */}
-          <div className="mb-8 lg:hidden">
+          <div className="flex items-center gap-3 mb-8 lg:hidden">
             <BrandLogo size="md" />
           </div>
 

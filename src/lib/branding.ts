@@ -4,7 +4,7 @@ export const APP_NAME = "SwapGyaan AI";
 export const APP_LOGO_SRC = "/src/assets/logo.png";
 
 // Public paths for meta/favicon/static use
-export const APP_LOGO_PUBLIC = "/image.png";
+export const APP_LOGO_PUBLIC = "/logo.png";
 export const APP_FAVICON = "/favicon.ico";
 
 export const BRAND_COLORS = {
